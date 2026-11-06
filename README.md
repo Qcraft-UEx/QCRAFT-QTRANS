@@ -12,6 +12,19 @@
 
 **QCRAFT Quantum Debugger**  is a tool for quantum circuit development designed for real-time collaboration and debug. It enables multiple users to **co-edit quantum circuits synchronously** through a shared visual interface. This functionality is built on a custom adaptation of the **Operational Transformation (OT)** model, tailored specifically for quantum circuits. And enables you to analyze circuit behavior step by step to verify logic using interactive **debug mode**.
 
+## QCRAFT-QTRANS
+### Configuración e integración de QCRAFT y QTransLIFIA
+
+QCRAFT requiere la instalación de la librería externa QTransLIFIA. Para que el sistema detecte las modificaciones del código en tiempo real, ambas herramientas deben enlazarse de forma manual en el entorno de desarrollo.
+
+Clona el repositorio de la librería en tu directorio de trabajo para que quede al mismo nivel que la carpeta principal de QCRAFT:
+
+git clone [https://github.com/jose-manuel-suarez/QTransLIFIA.git](https://github.com/jose-manuel-suarez/QTransLIFIA.git)
+
+Después, activa el entorno virtual dentro de la carpeta de QCRAFT y ejecuta la instalación apuntando a la ruta del repositorio clonado: pip install -e ../QTransLIFIA
+
+
+
 ## Documentation
 
 - [📖 Manual de Desarrollador (Español)](./Manual_Desarrollador.md)
