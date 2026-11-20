@@ -17,6 +17,7 @@ import braketIcon from "../assets/braket-icon.png";
 import qiskitIcon from "../assets/qiskit-icon.png";
 import qasmIcon2 from "../assets/openqasm2-icon.png";
 import qasmIcon3 from "../assets/openqasm3-icon.png";
+import pennylaneIcon from "../assets/pennylane-icon.png";
 
 import {
   Button,
@@ -38,6 +39,19 @@ const MisCircuitos = () => {
   const [ibmCode, setIbmCode] = useState(null);
   const [qasm2Code, setQasm2Code] = useState(null);
   const [qasm3Code, setQasm3Code] = useState(null);
+  const [pennylaneCode, setPennylaneCode] = useState(null);
+
+  // Estados para los diagramas visuales de cada lenguaje
+  const [awsDiagram, setAwsDiagram] = useState(null);
+  const [ibmDiagram, setIbmDiagram] = useState(null);
+  const [qasm2Diagram, setQasm2Diagram] = useState(null);
+  const [qasm3Diagram, setQasm3Diagram] = useState(null);
+  const [pennylaneDiagram, setPennylaneDiagram] = useState(null);
+
+  // Estados para el modo comparador lado a lado
+  const [isComparing, setIsComparing] = useState(false);
+  const [compareLeft, setCompareLeft] = useState("IBM");
+  const [compareRight, setCompareRight] = useState("PENNYLANE");
   
   const [isTranslating, setIsTranslating] = useState(false);
   const [editingCircuito, setEditingCircuito] = useState(null);
@@ -47,10 +61,12 @@ const MisCircuitos = () => {
   const [selectedShotsIBM, setSelectedShotsIBM] = useState("");
   const [selectedShotsAWS, setSelectedShotsAWS] = useState("");
   const [selectedShotsQASM, setSelectedShotsQASM] = useState("");
+  const [selectedShotsPennyLane, setSelectedShotsPennyLane] = useState("");
   
   const [selectedMaquinaIBM, setSelectedMaquinaIBM] = useState("");
   const [selectedMaquinaAWS, setSelectedMaquinaAWS] = useState("");
   const [selectedMaquinaQASM, setSelectedMaquinaQASM] = useState("");
+  const [selectedMaquinaPennyLane, setSelectedMaquinaPennyLane] = useState("");
   
   const [codigocolumnaAWS, setCodigocolumnaAWS] = useState(null); 
   const [receivedUrl, setReceivedUrl] = useState(null);
@@ -67,6 +83,10 @@ const MisCircuitos = () => {
   const [isExecutingE, setIsExecutingE] = useState(false); 
   const [noEjecucion, setNoEjecucion] = useState(null);
   const [nombreCircuito, setNombreCircuito] = useState(null);
+
+  // Estados para la verificación por cálculo ZX
+  const [zxResult, setZxResult] = useState(null);
+  const [isCheckingZx, setIsCheckingZx] = useState(false);
 
   const precios = {
     local: { tarea: 0, shot: 0 },
@@ -87,15 +107,19 @@ const MisCircuitos = () => {
 
   const handleProviderClick = (provider) => {
     setSelectedProvider(provider);
+    setIsComparing(false);
     setEjecucionCompletada(null);
     setEjecucionEnCurso("NO NULO");
     setNoEjecucion("NO NULO");
     setSelectedMaquinaAWS("");
     setSelectedMaquinaIBM("");
     setSelectedMaquinaQASM("");
+    setSelectedMaquinaPennyLane("");
     setSelectedShotsAWS("");
     setSelectedShotsIBM("");
     setSelectedShotsQASM("");
+    setSelectedShotsPennyLane("");
+    setZxResult(null);
   };
 
   useEffect(() => {
@@ -117,17 +141,12 @@ const MisCircuitos = () => {
       setPrecioTarea(0);
       setPrecioShot(0);
     }
-    // eslint-disable-next-line
   }, [selectedMaquinaAWS]);
 
   useEffect(() => {
     const total = precioTarea + precioShot * selectedShotsAWS;
     setCostoTotal(total);
   }, [selectedShotsAWS, precioTarea, precioShot]);
-
-  useEffect(() => {
-    console.log("Circuito ejecutado:", codigocolumnaAWS);
-  }, [codigocolumnaAWS]);
 
   useEffect(() => {
     const fetchCircuitos = async () => {
@@ -144,31 +163,36 @@ const MisCircuitos = () => {
       }
     };
     fetchCircuitos();
-    // eslint-disable-next-line
   }, [userEmail, user, ejecucionCompletada, ejecucionEnCurso]);
 
   const handleTranslate = async (url, nombre, url_desplegada) => {
     setEditingOrEjecting(true);
     setReceivedUrl(url_desplegada);
+    setZxResult(null);
+    setIsComparing(false);
     try {
       setIsTranslating(true);
       setSelectedCircuitoUrl(url); 
 
-      // 1. AWS
       const awsResponse = await axios.post("http://localhost:8000/api/translate/", { url: url, ecosystem: "braket" });
       if (awsResponse.data.code) setAwsCode(awsResponse.data.code);
+      setAwsDiagram(awsResponse.data.diagram || null);
 
-      // 2. IBM
       const ibmResponse = await axios.post("http://localhost:8000/api/translate/", { url: url, ecosystem: "qiskit" });
       if (ibmResponse.data.code) setIbmCode(ibmResponse.data.code);
+      setIbmDiagram(ibmResponse.data.diagram || null);
 
-      // 3. OpenQASM 2
       const qasm2Response = await axios.post("http://localhost:8000/api/translate/", { url: url, ecosystem: "qasm2" });
       if (qasm2Response.data.code) setQasm2Code(qasm2Response.data.code);
+      setQasm2Diagram(qasm2Response.data.diagram || null);
 
-      // 4. OpenQASM 3
       const qasm3Response = await axios.post("http://localhost:8000/api/translate/", { url: url, ecosystem: "qasm3" });
       if (qasm3Response.data.code) setQasm3Code(qasm3Response.data.code);
+      setQasm3Diagram(qasm3Response.data.diagram || null);
+
+      const pennylaneResponse = await axios.post("http://localhost:8000/api/translate/", { url: url, ecosystem: "pennylane" });
+      if (pennylaneResponse.data.code) setPennylaneCode(pennylaneResponse.data.code);
+      setPennylaneDiagram(pennylaneResponse.data.diagram || null);
 
       setTranslatedCircuito({ url, nombre });
     } catch (error) {
@@ -177,6 +201,27 @@ const MisCircuitos = () => {
     } finally {
       setIsTranslating(false);
       setEditingOrEjecting(false);
+    }
+  };
+
+  const handleVerifyZx = async (qasmCode) => {
+    if (!qasmCode) {
+      alert("Primero debes generar el código OpenQASM para poder verificarlo.");
+      return;
+    }
+    setIsCheckingZx(true);
+    setZxResult(null);
+    try {
+      const response = await axios.post("http://localhost:8000/api/verify-zx/", {
+        url: selectedCircuitoUrl,
+        qasm_code: qasmCode,
+      });
+      setZxResult(response.data.equivalent);
+    } catch (error) {
+      console.error("Error en la verificación ZX:", error);
+      alert("Error al verificar la equivalencia con cálculo ZX.");
+    } finally {
+      setIsCheckingZx(false);
     }
   };
 
@@ -263,19 +308,30 @@ const MisCircuitos = () => {
     ejecutarTraduccion(qasm3Code, "QASM3", selectedShotsQASM, selectedMaquinaQASM);
   };
 
+  const handleEjecutarPennyLaneClick = () => {
+    setEjecucionEnCurso("NO NULO");
+    setNoEjecucion("NO NULO");
+    setEjecucionCompletada(null);
+    ejecutarTraduccion(pennylaneCode, "PENNYLANE", selectedShotsPennyLane, selectedMaquinaPennyLane);
+  };
+
   const handleBack = () => {
     setTranslatedCircuito(null);
     setEjecucionEnCurso("NO NULO");
     setNoEjecucion("NO NULO");
     setSelectedProvider(null);
+    setIsComparing(false);
     setSelectedMaquinaAWS("");
     setSelectedMaquinaIBM("");
     setSelectedMaquinaQASM(""); 
+    setSelectedMaquinaPennyLane("");
     setSelectedShotsAWS("");
     setSelectedShotsIBM("");
     setSelectedShotsQASM(""); 
+    setSelectedShotsPennyLane("");
     setEjecucionCompletada(null);
     setNombreCircuito(null);
+    setZxResult(null);
   };
 
   const handleEditNombre = async (circuitoId, nuevoNombre) => {
@@ -308,10 +364,15 @@ const MisCircuitos = () => {
 
   const handleDeleteCircuito = async (id) => {
     try {
-      await axios.post("http://localhost:8000/circuitos/borrar_circuito/", {
-        email: user.email,
-        link_id: id,
+      await axios.delete("http://localhost:8000/circuitos/borrar_circuito/", {
+        data: {
+          email: user.email,
+          link_id: id,
+        },
       });
+      setCircuitos((prevCircuitos) =>
+        prevCircuitos.filter((circuito) => circuito.id !== id)
+      );
     } catch (error) {
       console.error(error);
     }
@@ -326,10 +387,140 @@ const MisCircuitos = () => {
 
   const handleNombreChange = (event) => setEditedNombre(event.target.value);
 
-  const handleEditCode = (circuito) => {
-    const urlQuirk = `${circuito.url}&cadena=${circuito.cadena}&cod=${circuito.id}`;
+// const construirUrlQuirk = (rawUrl, extraParams = {}) => {
+//     const [baseConQuery, hashPart = ""] = rawUrl.split("#");
+//     const [baseUrl, existingQuery = ""] = baseConQuery.split("?");
+//     const params = new URLSearchParams(existingQuery);
+
+//     Object.entries(extraParams).forEach(([key, val]) => {
+//       if (val !== undefined && val !== null && val !== "") {
+//         params.set(key, val);
+//       }
+//     });
+
+//     const queryString = params.toString();
+//     let finalUrl = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+
+//     if (hashPart) {
+//       let decodedHash = decodeURIComponent(hashPart);
+//       if (decodedHash.startsWith("circuit=")) {
+//         try {
+//           const circuitObj = JSON.parse(decodedHash.slice("circuit=".length));
+//           if (Array.isArray(circuitObj.gates)) {
+//             circuitObj.gates = circuitObj.gates.map((g) => {
+//               if (g && typeof g.matrix === "string") {
+//                 let m = g.matrix.trim();
+//                 while (m.startsWith("{{{") && m.endsWith("}}}")) {
+//                   m = m.slice(1, -1).trim();
+//                 }
+//                 return { ...g, matrix: m };
+//               }
+//               return g;
+//             });
+//           }
+//           decodedHash = "circuit=" + encodeURIComponent(JSON.stringify(circuitObj));
+//         } catch (e) {
+//           decodedHash = hashPart;
+//         }
+//       } else {
+//         decodedHash = hashPart;
+//       }
+//       finalUrl += `#${decodedHash}`;
+//     }
+
+//     return finalUrl;
+//   };
+
+
+const construirUrlQuirk = async (rawUrl, extraParams = {}) => {
+    const [baseConQuery, hashPart = ""] = rawUrl.split("#");
+    const [baseUrl, existingQuery = ""] = baseConQuery.split("?");
+    const params = new URLSearchParams(existingQuery);
+
+    Object.entries(extraParams).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== "") {
+        params.set(key, val);
+      }
+    });
+
+    const queryString = params.toString();
+    let finalUrl = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+
+    let cols = [];
+    let gatesOriginales = [];
+    if (hashPart && hashPart.startsWith("circuit=")) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(hashPart.slice("circuit=".length)));
+        cols = parsed.cols || [];
+        gatesOriginales = parsed.gates || [];
+      } catch (e) {
+        console.error("Error al leer el JSON del circuito:", e);
+      }
+    }
+
+    let gatesDesdeBD = [];
+    try {
+      const emailConsulta = extraParams.user || user?.email || "";
+      const resp = await axios.get(
+        `http://localhost:8000/circuitos/obtener_puertas_custom/?email=${encodeURIComponent(emailConsulta)}`
+      );
+      const puertasUsuario = resp.data.custom_gates || [];
+      gatesDesdeBD = puertasUsuario.map((p) => {
+        const defStr = (p.definition || "").trim();
+        if (defStr.startsWith("{{")) {
+          return { id: p.symbol, name: p.name, matrix: defStr };
+        }
+        try {
+          return { id: p.symbol, name: p.name, circuit: JSON.parse(defStr) };
+        } catch (e) {
+          return { id: p.symbol, name: p.name, matrix: defStr };
+        }
+      });
+    } catch (e) {
+      console.error("Error al cargar puertas desde BD:", e);
+    }
+
+    const mapaGates = new Map();
+    gatesOriginales.forEach((g) => {
+      if (g && g.id) {
+        if (typeof g.matrix === "string") {
+          g.matrix = g.matrix.trim().replace(/^\{\{+/, "{{").replace(/\}\}+$/, "}}");
+        }
+        mapaGates.set(g.id, g);
+      }
+    });
+    gatesDesdeBD.forEach((g) => {
+      mapaGates.set(g.id, g);
+    });
+
+    if (hashPart) {
+      const circuitPayload = {
+        cols: cols,
+        gates: Array.from(mapaGates.values()),
+      };
+      finalUrl += `#circuit=${encodeURIComponent(JSON.stringify(circuitPayload))}`;
+    }
+
+    return finalUrl;
+  };
+
+  const handleEditCode = async (circuito) => {
+    const urlQuirk = await construirUrlQuirk(circuito.url, {
+      cadena: circuito.cadena,
+      cod: circuito.id,
+      user: user?.email,
+    });
     window.location.href = urlQuirk;
   };
+
+  // const handleEditCode = (circuito) => {
+  //   const urlQuirk = construirUrlQuirk(circuito.url, {
+  //     cadena: circuito.cadena,
+  //     cod: circuito.id,
+  //     user: user?.email,
+  //   });
+  //   window.location.href = urlQuirk;
+  // };
 
   const handleDebugClick = (url, id) => {
     const [baseUrl, hash] = url.split("#");
@@ -363,6 +554,28 @@ const MisCircuitos = () => {
     toggle();
   };
 
+  const providerData = {
+    AWS: { label: "Amazon Braket", code: awsCode, diagram: awsDiagram },
+    IBM: { label: "Qiskit", code: ibmCode, diagram: ibmDiagram },
+    QASM2: { label: "OpenQASM 2", code: qasm2Code, diagram: qasm2Diagram },
+    QASM3: { label: "OpenQASM 3", code: qasm3Code, diagram: qasm3Diagram },
+    PENNYLANE: { label: "PennyLane", code: pennylaneCode, diagram: pennylaneDiagram },
+  };
+
+  const renderDiagrama = (diagram, label) => {
+    if (!diagram) return null;
+    return (
+      <div style={{ margin: "15px 0", padding: "12px", backgroundColor: "#fff", border: "1px solid #e0e0e0", borderRadius: "6px", overflowX: "auto" }}>
+        <h5 style={{ marginBottom: "10px", fontSize: "15px", color: "#333" }}>Diagrama del circuito ({label}):</h5>
+        {diagram.type === "image" ? (
+          <img src={diagram.data} alt={`Diagrama ${label}`} style={{ maxWidth: "100%", height: "auto", display: "block", margin: "0 auto" }} />
+        ) : (
+          <pre style={{ backgroundColor: "#f8f9fa", padding: "10px", borderRadius: "4px", fontFamily: "monospace", margin: 0 }}>{diagram.data}</pre>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="mis-circuitos-container">
@@ -375,57 +588,64 @@ const MisCircuitos = () => {
               <h3>{nombreCircuito}</h3>
             </div>
             
-            {/* NUEVA CUADRÍCULA 2x2 PARA LOS BOTONES */}
             <div 
               className="mis-circuitos-button-container" 
               style={{ 
                 display: 'grid', 
-                gridTemplateColumns: '1fr 1fr', 
-                gap: '20px', 
-                maxWidth: '600px', 
+                gridTemplateColumns: 'repeat(5, 1fr)', 
+                gap: '15px', 
+                maxWidth: '960px', 
                 margin: '0 auto',
                 paddingBottom: '30px'
               }}
             >
               <button
                 onClick={() => handleProviderClick("AWS")}
-                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '20px', cursor: 'pointer', height: '160px', transition: '0.3s' }}
+                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '15px', cursor: 'pointer', height: '140px', transition: '0.3s' }}
               >
-                <img src={braketIcon} alt="Amazon Braket Logo" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain', marginBottom: '15px' }} />
-                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#333' }}>Amazon Braket</span>
+                <img src={braketIcon} alt="Amazon Braket Logo" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain', marginBottom: '10px' }} />
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>Amazon Braket</span>
               </button>
               
               <button
                 onClick={() => handleProviderClick("IBM")}
-                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '20px', cursor: 'pointer', height: '160px', transition: '0.3s' }}
+                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '15px', cursor: 'pointer', height: '140px', transition: '0.3s' }}
               >
-                <img src={qiskitIcon} alt="Qiskit Logo" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain', marginBottom: '15px' }} />
-                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#333' }}>Qiskit</span>
+                <img src={qiskitIcon} alt="Qiskit Logo" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain', marginBottom: '10px' }} />
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>Qiskit</span>
               </button>
               
               <button
                 onClick={() => handleProviderClick("QASM2")}
-                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '20px', cursor: 'pointer', height: '160px', transition: '0.3s' }}
+                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '15px', cursor: 'pointer', height: '140px', transition: '0.3s' }}
               >
-                <img src={qasmIcon2} alt="OpenQASM 2 Logo" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain', marginBottom: '15px' }} />
-                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#333' }}>OpenQASM 2</span>
+                <img src={qasmIcon2} alt="OpenQASM 2 Logo" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain', marginBottom: '10px' }} />
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>OpenQASM 2</span>
               </button>
               
               <button
                 onClick={() => handleProviderClick("QASM3")}
-                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '20px', cursor: 'pointer', height: '160px', transition: '0.3s' }}
+                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '15px', cursor: 'pointer', height: '140px', transition: '0.3s' }}
               >
-                <img src={qasmIcon3} alt="OpenQASM 3 Logo" style={{ maxHeight: '70px', maxWidth: '100%', objectFit: 'contain', marginBottom: '15px' }} />
-                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#333' }}>OpenQASM 3</span>
+                <img src={qasmIcon3} alt="OpenQASM 3 Logo" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain', marginBottom: '10px' }} />
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>OpenQASM 3</span>
+              </button>
+
+              <button
+                onClick={() => handleProviderClick("PENNYLANE")}
+                style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '15px', cursor: 'pointer', height: '140px', transition: '0.3s' }}
+              >
+                <img src={pennylaneIcon} alt="PennyLane Logo" style={{ maxHeight: '60px', maxWidth: '100%', objectFit: 'contain', marginBottom: '10px' }} />
+                <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>PennyLane</span>
               </button>
             </div>
-            {/* FIN DE LA CUADRÍCULA */}
 
             <div className="mis-circuitos-code-container">
               {selectedProvider === "AWS" && (
                 <div className="mis-circuitos-quadrant">
                   <h4>Código AWS:</h4>
                   <pre>{awsCode}</pre>
+                  {renderDiagrama(awsDiagram, "Amazon Braket")}
                   <label htmlFor="selectMaquinaAWS">Seleccionar máquina: </label>
                   <select id="selectMaquinaAWS" value={selectedMaquinaAWS} onChange={(e) => setSelectedMaquinaAWS(e.target.value)}>
                     <option value="">Seleccione una</option>
@@ -484,6 +704,7 @@ const MisCircuitos = () => {
                 <div className="mis-circuitos-quadrant">
                   <h4>Código IBM:</h4>
                   <pre>{ibmCode}</pre>
+                  {renderDiagrama(ibmDiagram, "Qiskit")}
                   <label htmlFor="selectMaquinaIBM">Seleccionar máquina: </label>
                   <select id="selectMaquinaIBM" value={selectedMaquinaIBM} onChange={(e) => setSelectedMaquinaIBM(e.target.value)}>
                     <option value="">Seleccione una</option>
@@ -534,6 +755,24 @@ const MisCircuitos = () => {
                 <div className="mis-circuitos-quadrant">
                   <h4>Código OpenQASM 2:</h4>
                   <pre>{qasm2Code}</pre>
+                  {renderDiagrama(qasm2Diagram, "OpenQASM 2")}
+                  
+                  {/* SECCIÓN DE VERIFICACIÓN POR CÁLCULO ZX */}
+                  <div style={{ margin: '15px 0', padding: '10px', background: '#f8f9fa', border: '1px solid #ddd', borderRadius: '6px' }}>
+                    <button 
+                      onClick={() => handleVerifyZx(qasm2Code)} 
+                      style={{ backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      {isCheckingZx ? "Verificando con ZX..." : "Verificar Equivalencia (Cálculo ZX)"}
+                    </button>
+                    
+                    {zxResult !== null && (
+                      <p style={{ marginTop: '10px', fontWeight: 'bold', color: zxResult ? 'green' : 'red' }}>
+                        {zxResult ? "✔ Los circuitos son matemáticamente equivalentes (Cálculo ZX)." : "✖ Los circuitos NO son equivalentes."}
+                      </p>
+                    )}
+                  </div>
+
                   <label htmlFor="selectMaquinaQASM2">Seleccionar máquina: </label>
                   <select id="selectMaquinaQASM2" value={selectedMaquinaQASM} onChange={(e) => setSelectedMaquinaQASM(e.target.value)}>
                     <option value="">Seleccione una</option>
@@ -563,6 +802,24 @@ const MisCircuitos = () => {
                 <div className="mis-circuitos-quadrant">
                   <h4>Código OpenQASM 3:</h4>
                   <pre>{qasm3Code}</pre>
+                  {renderDiagrama(qasm3Diagram, "OpenQASM 3")}
+                  
+                  {/* SECCIÓN DE VERIFICACIÓN POR CÁLCULO ZX PARA QASM 3 */}
+                  <div style={{ margin: '15px 0', padding: '10px', background: '#f8f9fa', border: '1px solid #ddd', borderRadius: '6px' }}>
+                    <button 
+                      onClick={() => handleVerifyZx(qasm3Code)} 
+                      style={{ backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      {isCheckingZx ? "Verificando con ZX..." : "Verificar Equivalencia (Cálculo ZX)"}
+                    </button>
+                    
+                    {zxResult !== null && (
+                      <p style={{ marginTop: '10px', fontWeight: 'bold', color: zxResult ? 'green' : 'red' }}>
+                        {zxResult ? "✔ Los circuitos son matemáticamente equivalentes (Cálculo ZX)." : "✖ Los circuitos NO son equivalentes."}
+                      </p>
+                    )}
+                  </div>
+
                   <label htmlFor="selectMaquinaQASM3">Seleccionar máquina: </label>
                   <select id="selectMaquinaQASM3" value={selectedMaquinaQASM} onChange={(e) => setSelectedMaquinaQASM(e.target.value)}>
                     <option value="">Seleccione una</option>
@@ -588,11 +845,115 @@ const MisCircuitos = () => {
                 </div>
               )}
 
+              {selectedProvider === "PENNYLANE" && (
+                <div className="mis-circuitos-quadrant">
+                  <h4>Código PennyLane:</h4>
+                  <pre>{pennylaneCode}</pre>
+                  {renderDiagrama(pennylaneDiagram, "PennyLane")}
+                  <label htmlFor="selectMaquinaPennyLane">Seleccionar máquina: </label>
+                  <select id="selectMaquinaPennyLane" value={selectedMaquinaPennyLane} onChange={(e) => setSelectedMaquinaPennyLane(e.target.value)}>
+                    <option value="">Seleccione una</option>
+                    <option value="local">local</option>
+                  </select>
+                  <input type="number" value={selectedShotsPennyLane} onChange={(e) => setSelectedShotsPennyLane(e.target.value)} placeholder="Número de shots" />
+                  <button onClick={handleEjecutarPennyLaneClick}>Ejecutar PennyLane</button>
+                  {!ejecucionEnCurso && (
+                    <p>
+                      Su ejecución está en curso, puede comprobar el estado de
+                      la misma en la pestaña{" "}
+                      <a href="http://localhost:3000/resultados">Resultados</a>.
+                    </p>
+                  )}
+                  {ejecucionCompletada && (
+                    <p>
+                      Su ejecución ha sido completada. Puede ver los resultados
+                      en la pestaña{" "}
+                      <a href="http://localhost:3000/resultados">Resultados</a>.
+                    </p>
+                  )}
+                  {isExecutingE && <LoadingOverlay />}
+                </div>
+              )}
             </div>
-            {!receivedUrl && <p><button onClick={() => handleSendUrl(selectedCircuitoUrl)}>Crear servicio</button></p>}
-            {receivedUrl && <p>El servicio ha sido creado correctamente. Puede acceder a él en la siguiente URL: <a href={receivedUrl}>{receivedUrl}</a></p>}
+
+            {isComparing && (
+              <div style={{ marginTop: "20px", padding: "20px", backgroundColor: "#f8f9fa", border: "1px solid #ddd", borderRadius: "8px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+                  <h4 style={{ margin: 0 }}>Comparación de circuitos</h4>
+                  <button
+                    onClick={() => setIsComparing(false)}
+                    style={{ backgroundColor: "#dc3545", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "4px", cursor: "pointer" }}
+                  >
+                    Cerrar comparación
+                  </button>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+                  <div style={{ backgroundColor: "#fff", padding: "15px", borderRadius: "6px", border: "1px solid #ddd", overflowX: "auto" }}>
+                    <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>Lenguaje 1:</label>
+                    <select
+                      value={compareLeft}
+                      onChange={(e) => setCompareLeft(e.target.value)}
+                      style={{ width: "100%", padding: "8px", marginBottom: "15px", borderRadius: "4px", border: "1px solid #ccc" }}
+                    >
+                      <option value="AWS">Amazon Braket</option>
+                      <option value="IBM">Qiskit</option>
+                      <option value="QASM2">OpenQASM 2</option>
+                      <option value="QASM3">OpenQASM 3</option>
+                      <option value="PENNYLANE">PennyLane</option>
+                    </select>
+                    <h5>Código {providerData[compareLeft].label}:</h5>
+                    <pre style={{ backgroundColor: "#f4f4f4", padding: "10px", borderRadius: "4px", maxHeight: "300px", overflowY: "auto" }}>
+                      {providerData[compareLeft].code}
+                    </pre>
+                    {renderDiagrama(providerData[compareLeft].diagram, providerData[compareLeft].label)}
+                  </div>
+
+                  <div style={{ backgroundColor: "#fff", padding: "15px", borderRadius: "6px", border: "1px solid #ddd", overflowX: "auto" }}>
+                    <label style={{ fontWeight: "bold", display: "block", marginBottom: "8px" }}>Lenguaje 2:</label>
+                    <select
+                      value={compareRight}
+                      onChange={(e) => setCompareRight(e.target.value)}
+                      style={{ width: "100%", padding: "8px", marginBottom: "15px", borderRadius: "4px", border: "1px solid #ccc" }}
+                    >
+                      <option value="AWS">Amazon Braket</option>
+                      <option value="IBM">Qiskit</option>
+                      <option value="QASM2">OpenQASM 2</option>
+                      <option value="QASM3">OpenQASM 3</option>
+                      <option value="PENNYLANE">PennyLane</option>
+                    </select>
+                    <h5>Código {providerData[compareRight].label}:</h5>
+                    <pre style={{ backgroundColor: "#f4f4f4", padding: "10px", borderRadius: "4px", maxHeight: "300px", overflowY: "auto" }}>
+                      {providerData[compareRight].code}
+                    </pre>
+                    {renderDiagrama(providerData[compareRight].diagram, providerData[compareRight].label)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "20px", flexWrap: "wrap" }}>
+              {!receivedUrl && (
+                <button onClick={() => handleSendUrl(selectedCircuitoUrl)}>Crear servicio</button>
+              )}
+              <button
+                onClick={() => {
+                  setSelectedProvider(null);
+                  setIsComparing(!isComparing);
+                }}
+              >
+                {isComparing ? "Ocultar comparador" : "Comparar circuitos"}
+              </button>
+            </div>
+
+            {receivedUrl && (
+              <p style={{ marginTop: "10px" }}>
+                El servicio ha sido creado correctamente. Puede acceder a él en la siguiente URL:{" "}
+                <a href={receivedUrl}>{receivedUrl}</a>
+              </p>
+            )}
             {isExecutingS && <LoadingOverlayS />}
-            <p><button onClick={handleBack}>Volver</button></p>
+            <p style={{ marginTop: "10px" }}><button onClick={handleBack}>Volver</button></p>
           </div>
         ) : (
           <ul className="mis-circuitos-list">

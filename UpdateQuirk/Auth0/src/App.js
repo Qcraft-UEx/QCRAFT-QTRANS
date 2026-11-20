@@ -10,6 +10,7 @@ import Footer from "./components/Footer";
 import Home from "./views/Home";
 import Profile from "./views/Profile";
 import MisCircuitos from './views/MisCircuitos';
+import MisPuertas from './views/MisPuertas';
 import Resultados from './views/Resultados'; 
 import { useAuth0 } from "@auth0/auth0-react";
 import history from "./utils/history";
@@ -42,6 +43,7 @@ const App = () => {
             <Switch>
               <Route path="/" exact component={Home} />
               <Route path="/mis-circuitos" component={MisCircuitos} /> {/* Esta es la ruta para MisCircuitos */}
+              <Route path="/mis-puertas" component={MisPuertas} />
               <Route path="/resultados" component={Resultados} /> {/* Esta es la ruta para Resultados */}
               <Route path="/profile" component={Profile} />
               <Route path="/receptor-datos" component={ReceptorDatos} />

@@ -16,10 +16,115 @@
 
 import {notifyAboutRecoveryFromUnexpectedError} from "../fallback.js"
 import {CircuitDefinition} from "../circuit/CircuitDefinition.js"
+import {CircuitStats} from "../circuit/CircuitStats.js"
 import {Config} from "../Config.js"
+import {Format} from "../base/Format.js"
 import {HistoryPusher} from "../browser/HistoryPusher.js"
+import {Matrix} from "../math/Matrix.js"
 import {fromJsonText_CircuitDefinition, Serializer} from "../circuit/Serializer.js"
 import { takeScreenshotOfCanvas } from "../fallback.js";
+
+// --- GESTIÓN DE USUARIO Y PUERTAS CUSTOM ---
+window.userEmail = null;
+
+function extraerUsuarioDeUrl() {
+    const urlString = window.location.href;
+    const userMatch = urlString.match(/[?&]user=([^&#]+)/);
+    
+    if (userMatch && userMatch[1]) {
+        window.userEmail = decodeURIComponent(userMatch[1]);
+        cargarPuertasUsuario(window.userEmail);
+    }
+}
+
+extraerUsuarioDeUrl();
+
+function cargarPuertasUsuario(email) {
+    fetch(`http://localhost:8000/circuitos/obtener_puertas_custom/?email=${encodeURIComponent(email)}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.custom_gates && data.custom_gates.length > 0) {
+                inyectarPuertasEnCircuito(data.custom_gates);
+            }
+        })
+        .catch(err => console.error("Error al cargar puertas del usuario:", err));
+}
+
+function inyectarPuertasEnCircuito(puertasBD) {
+    window.customGatesBD = puertasBD;
+    
+    let hash = window.location.hash;
+    let jsonText = "{}";
+    
+    if (hash.includes("circuit=")) {
+        const start = hash.indexOf('circuit=') + 8;
+        let end = hash.indexOf('&', start);
+        if (end === -1) end = hash.length;
+        jsonText = decodeURIComponent(hash.substring(start, end));
+    }
+    
+    try {
+        let circuito = JSON.parse(jsonText);
+        if (!circuito.gates) circuito.gates = []; // Asegúrate de que aquí pone .gates y no .{gates
+        
+        let huboCambios = false;
+        puertasBD.forEach(puertaBD => {
+            let existe = circuito.gates.some(g => (typeof g === 'string' ? g === puertaBD.symbol : g.id === puertaBD.symbol));
+            if (!existe) {
+                let def = (puertaBD.definition || "").trim();
+                
+                // Si la definición es un JSON de columnas/matriz pero viene sin dobles llaves
+                if (def.startsWith("{") || def.startsWith("[")) {
+                    try {
+                        let parsed = JSON.parse(def);
+                        if (parsed.cols) {
+                            // Si es un circuito con 'cols', asígnalo a 'circuit' en lugar de 'matrix'
+                            circuito.gates.push({
+                                id: puertaBD.symbol,
+                                name: puertaBD.name || puertaBD.symbol,
+                                circuit: parsed
+                            });
+                        } else {
+                            // Si es una matriz pura, envuélvela en el formato que espera Quirk con dobles llaves si es necesario
+                            circuito.gates.push({
+                                id: puertaBD.symbol,
+                                name: puertaBD.name || puertaBD.symbol,
+                                matrix: "{{" + def.replace(/^\{|\}$/g, '') + "}}"
+                            });
+                        }
+                        huboCambios = true;
+                    } catch (_) {
+                        // Fallback si falla el parseo
+                        circuito.gates.push({
+                            id: puertaBD.symbol,
+                            name: puertaBD.name || puertaBD.symbol,
+                            matrix: "{{" + def + "}}"
+                        });
+                        huboCambios = true;
+                    }
+                } else if (def.startsWith("{{")) {
+                    circuito.gates.push({
+                        id: puertaBD.symbol,
+                        name: puertaBD.name || puertaBD.symbol,
+                        matrix: def
+                    });
+                    huboCambios = true;
+                } else {
+                    circuito.gates.push(puertaBD.symbol);
+                    huboCambios = true;
+                }
+            }
+        });
+        
+        if (huboCambios) {
+            const nuevoHash = "#circuit=" + encodeURIComponent(JSON.stringify(circuito));
+            window.location.hash = nuevoHash;
+            window.dispatchEvent(new Event('popstate'));
+        }
+    } catch(e) {
+        console.error("Error al inyectar puertas custom en el circuito:", e);
+    }
+}
 
 function urlWithCircuitHash(jsonText) {
     if (jsonText.indexOf('%') !== -1 || jsonText.indexOf('&') !== -1) {
@@ -32,7 +137,6 @@ function urlWithCircuitHash(jsonText) {
  * @param {!Revision} revision
  */
 function initUrlCircuitSync(revision) {
-    // Pull initial circuit out of URL '#x=y' arguments.
     const getHashParameters = () => {
         let hashText = document.location.hash.substr(1);
         let paramsMap = new Map();
@@ -87,223 +191,216 @@ function initUrlCircuitSync(revision) {
     });
 }
 
-
+// function obtenerURL() {
+//     let url = window.location.href;
+//     url = url.replace(/([?&])user=[^&#]+&?/, '$1').replace(/[?&]$/, '');
+    
+//     const index = url.indexOf("&cadena=");
+//     if (index !== -1) {
+//         url = url.substring(0, index);
+//     }
+//     url = decodeURIComponent(url);
+//     return url;
+// }
 
 
 function obtenerURL() {
     let url = window.location.href;
-    console.log("URL original:", url);
-    // Obtener la posición de "&cadena="
+    url = url.replace(/([?&])user=([^&#]+)&?/, '$1').replace(/[?&]$/, '');
+    
     const index = url.indexOf("&cadena=");
     if (index !== -1) {
-        // Si se encuentra "&cadena=", eliminar todo desde ese punto en adelante
         url = url.substring(0, index);
     }
     url = decodeURIComponent(url);
-    console.log("URL decodificada:", url);
-
     return url;
 }
 
+// Función auxiliar para limpiar y asegurar que el circuito no guarde basura en formato cols plano desestructurado
+function obtenerCadenaCircuitoLimpia() {
+    let hash = window.location.hash;
+    if (hash.includes("circuit=")) {
+        const start = hash.indexOf('circuit=') + 8;
+        let end = hash.indexOf('&', start);
+        if (end === -1) end = hash.length;
+        let jsonText = decodeURIComponent(hash.substring(start, end));
+        console.log("JSON que se va a enviar a Django:", jsonText);
+        try {
+            let parsed = JSON.parse(jsonText);
+            return JSON.stringify(parsed);
+        } catch (e) {
+            return jsonText;
+        }
+    }
+    return window.cadenaCircuito || "";
+}
 
-// Escuchar el evento 'message' para recibir el mensaje del documento principal
 window.addEventListener('message', function(event) {
-    // Verificar si el mensaje es del tipo 'get url'
     if (event.data && event.data.type === 'get url') {
-        // Obtener la URL actual
         const urlQuirk = obtenerURL();
-        console.log("URL actual:", urlQuirk); // Comprobar si la URL se obtiene correctamente
-        // Enviar la URL a Django
         enviarURLADjango(urlQuirk);
     }
     else if (event.data && event.data.type === 'edit circuit') {
-        // Obtener la URL actual de Quirk
         const urlQuirk = obtenerURL();
-        console.log("URL actual de Quirk:", urlQuirk); // Comprobar si la URL se obtiene correctamente
-        // Obtener la URL global de Quirk desde quirk.template.html
         let urlGlobalQuirk = window.urlAntesDeCadena;
-        urlGlobalQuirk = decodeURIComponent(urlGlobalQuirk);
-        console.log("-----------------------------------");
-        console.log("URL global decodificada de Quirk:", urlGlobalQuirk); // Comprobar si la URL global se decodifica correctamente
-        console.log("URL actual de Quirk:", urlQuirk); // Comprobar si la URL actual se obtiene correctamente
-        console.log("-----------------------------------");
-        // Comprobar si la URL actual de Quirk es igual a la URL global de Quirk
+        if (urlGlobalQuirk) {
+            urlGlobalQuirk = decodeURIComponent(urlGlobalQuirk);
+        }
+        
+        // Usamos la función de limpieza para capturar la cadena correcta del circuito con sus cols/gates bien formados
+        let cadenaCircuito = obtenerCadenaCircuitoLimpia();
+        
         if (urlQuirk === urlGlobalQuirk) {
-            console.log("La URL actual de Quirk es igual a la URL global de Quirk");
             window.location.href = `http://localhost:3000/mis-circuitos`;
         } else {
-                // Obtener la cadena del circuito desde quirk.template.html
-                let cadenaCircuito = window.cadenaCircuito;
-                console.log("Enviando la cadena global con la URL actual de Quirk a un nuevo endpoint en Quirk");
-                console.log("URL actual de Quirk:", urlQuirk); // Agregar este mensaje de registro
-                console.log("Cadena de circuito:", cadenaCircuito); // Agregar este mensaje de registro
-                enviarURLADjangoEditada(urlQuirk, cadenaCircuito);            
+            enviarURLADjangoEditada(urlQuirk, cadenaCircuito);            
         }
     }    
 });
 
 
+window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'get url') {
+        const urlQuirk = obtenerURL();
+        enviarURLADjango(urlQuirk);
+    }
+    else if (event.data && event.data.type === 'edit circuit') {
+        const urlQuirk = obtenerURL();
+        let urlGlobalQuirk = window.urlAntesDeCadena;
+        urlGlobalQuirk = decodeURIComponent(urlGlobalQuirk);
+        
+        if (urlQuirk === urlGlobalQuirk) {
+            window.location.href = `http://localhost:3000/mis-circuitos`;
+        } else {
+            let cadenaCircuito = window.cadenaCircuito;
+            enviarURLADjangoEditada(urlQuirk, cadenaCircuito);            
+        }
+    }    
+});
 
+function obtenerSimbolosPuertasActivas(url) {
+    const start = url.indexOf('circuit=');
+    if (start === -1) return [];
+    let end = url.indexOf('&', start);
+    const rawParam = end === -1 ? url.substring(start + 8) : url.substring(start + 8, end);
+    try {
+        const circuito = JSON.parse(decodeURIComponent(rawParam));
+        const usados = new Set();
+        (circuito.cols || []).forEach(col => {
+            (col || []).forEach(celda => {
+                if (typeof celda === 'string' && celda.startsWith('~')) {
+                    usados.add(celda.split(':')[0]);
+                }
+            });
+        });
+        return Array.from(usados);
+    } catch (e) {
+        return [];
+    }
+}
 
+function obtenerMatrizCircuito(urlQuirk) {
+    try {
+        const start = urlQuirk.indexOf('circuit=');
+        if (start === -1) return null;
+        let end = urlQuirk.indexOf('&', start);
+        const rawJson = end === -1 ? urlQuirk.substring(start + 8) : urlQuirk.substring(start + 8, end);
+        const circuitDef = fromJsonText_CircuitDefinition(decodeURIComponent(rawJson));
+        const n = circuitDef.numWires;
+        if (n > 6) return null;
+
+        const dim = 1 << n;
+        const buf = new Float32Array(dim * dim * 2);
+
+        for (let col = 0; col < dim; col++) {
+            const initStates = new Map();
+            for (let w = 0; w < n; w++) {
+                if ((col >> w) & 1) {
+                    initStates.set(w, "1");
+                }
+            }
+            const stats = CircuitStats.fromCircuitAtTime(circuitDef.withInitialStates(initStates), 0);
+            const stateBuf = stats.finalState.rawBuffer();
+            for (let row = 0; row < dim; row++) {
+                const dstIdx = (row * dim + col) * 2;
+                const srcIdx = row * 2;
+                buf[dstIdx] = stateBuf[srcIdx];
+                buf[dstIdx + 1] = stateBuf[srcIdx + 1];
+            }
+        }
+        return new Matrix(dim, dim, buf).toString(new Format(false, 0, 7, ","));
+    } catch (e) {
+        console.warn("No se pudo calcular la matriz del circuito:", e);
+        return null;
+    }
+}
 
 function enviarURLADjangoEditada(urlQuirk, cadenaCircuito) {
-    console.log("Enviando solicitud para actualizar la URL del circuito...");
-
-    // Obtener la captura de pantalla del canvas
     let canvas = document.getElementById("drawCanvas");
     let canvasDataURL = canvas.toDataURL("image/png");
-    console.log("Captura de pantalla del canvas:", canvasDataURL);
 
-    // Crear un objeto JSON para enviar los datos
-    var data = JSON.stringify({urlQuirk: urlQuirk, cadenaCircuito: cadenaCircuito, screenshotUrl: canvasDataURL});
+    var data = JSON.stringify({
+        urlQuirk: urlQuirk, 
+        cadenaCircuito: cadenaCircuito, 
+        screenshotUrl: canvasDataURL,
+        email: window.userEmail,
+        customGates: obtenerSimbolosPuertasActivas(urlQuirk),
+        matrix: obtenerMatrizCircuito(urlQuirk)
+    });
 
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "http://localhost:8000/actualizar_url_circuito/", true);
-    xhr.setRequestHeader("Content-Type", "application/json");  // Establecer el tipo de contenido como JSON
+    xhr.setRequestHeader("Content-Type", "application/json"); 
     xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
             if (xhr.status === 200) {
-                console.log("Datos enviados exitosamente a Django");
                 var response = JSON.parse(xhr.responseText);
                 if (response.url) {
-                    console.log("URL actualizada:", response.url);
                     window.location.href = `http://localhost:3000/mis-circuitos`;
                 } else {
-                    console.error("Error: No se recibió la URL esperada desde Django");
                     alert("Error al actualizar la URL en el servidor.");
                 }
             } else {
-                console.error("Error al enviar los datos a Django. Código de estado:", xhr.status);
                 alert("Error en la solicitud al servidor.");
             }
         }
     };
     xhr.onerror = function() {
-        console.error("Error de red al enviar los datos a Django");
         alert("Error de red al enviar la solicitud al servidor.");
     };
-    console.log("Datos enviados:", data);
     xhr.send(data);
 }
 
-
-// function enviarURLADjangoEditada(urlQuirk, cadenaCircuito) {
-//     console.log("Enviando solicitud para actualizar la URL del circuito...");
-//     var xhr = new XMLHttpRequest();
-//     xhr.open("POST", "http://localhost:8000/actualizar_url_circuito/", true);
-//     xhr.setRequestHeader("Content-Type", "application/json");  // Establecer el tipo de contenido como JSON
-//     xhr.onreadystatechange = function () {
-//         if (xhr.readyState === 4) {
-//             if (xhr.status === 200) {
-//                 console.log("Datos enviados exitosamente a Django");
-//                 // Obtener la respuesta de Django
-//                 var response = JSON.parse(xhr.responseText);
-//                 // Verificar si se recibió la URL y la cadena
-//                 if (response.url) {
-//                     console.log("URL actualizada:", response.url);
-//                     // Si necesitas manejar la respuesta del servidor aquí, puedes hacerlo
-//                     window.location.href = `http://localhost:3000/mis-circuitos`;
-//                 } else {
-//                     console.error("Error: No se recibió la URL esperada desde Django");
-//                     // Mensaje de error en el cliente
-//                     alert("Error al actualizar la URL en el servidor.");
-//                 }
-//             } else {
-//                 console.error("Error al enviar los datos a Django. Código de estado:", xhr.status);
-//                 // Mensaje de error en el cliente
-//                 alert("Error en la solicitud al servidor.");
-//             }
-//         }
-//     };
-//     xhr.onerror = function() {
-//         console.error("Error de red al enviar los datos a Django");
-//         // Mensaje de error en el cliente
-//         alert("Error de red al enviar la solicitud al servidor.");
-//     };
-//     var data = JSON.stringify({urlQuirk: urlQuirk, cadenaCircuito: cadenaCircuito}); // Convertir a JSON
-//     console.log("Datos enviados:", data);
-//     xhr.send(data);
-// }
-
 function enviarURLADjango(urlQuirk) {
-    // Obtener la captura de pantalla del canvas
     let canvas = document.getElementById("drawCanvas");
     let canvasDataURL = canvas.toDataURL("image/png");
-    console.log("Captura de pantalla del canvas:", canvasDataURL);
 
-    // Crear un objeto JSON para enviar los datos
-    var data = JSON.stringify({urlQuirk: urlQuirk, screenshotUrl: canvasDataURL});
+    var data = JSON.stringify({
+        urlQuirk: urlQuirk, 
+        screenshotUrl: canvasDataURL,
+        email: window.userEmail,
+        customGates: obtenerSimbolosPuertasActivas(urlQuirk),
+        matrix: obtenerMatrizCircuito(urlQuirk)
+    });
 
-    // Crear una solicitud AJAX usando XMLHttpRequest
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "http://localhost:8000/recibir_url_quirk/", true);
-    xhr.setRequestHeader("Content-Type", "application/json");  // Establecer el tipo de contenido como JSON
+    xhr.setRequestHeader("Content-Type", "application/json"); 
     xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
             if (xhr.status === 200) {
-                console.log("URL enviada exitosamente a Django");
-                // Obtener la respuesta de Django
                 var response = JSON.parse(xhr.responseText);
-                // Verificar si se recibió la URL
                 if (response.url && response.cadena) {
-                    console.log("URL con ID:", response.url);
-                    // Enviar la cadena a la aplicación de React
                     enviarIDAReact(response.cadena);
-                } else {
-                    console.error("Error: No se recibió la URL o la cadena esperada desde Django");
                 }
-            } else {
-                console.error("Error al enviar la URL a Django. Código de estado:", xhr.status);
             }
         }
     };
-    xhr.onerror = function() {
-        console.error("Error de red al enviar la URL a Django");
-    };
-    // Enviar los datos JSON
     xhr.send(data);
 }
 
-
-
-
-// function enviarURLADjango(urlQuirk) {
-//     var xhr = new XMLHttpRequest();
-//     xhr.open("POST", "http://localhost:8000/recibir_url_quirk/", true);
-//     xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-//     xhr.onreadystatechange = function () {
-//         if (xhr.readyState === 4) {
-//             if (xhr.status === 200) {
-//                 console.log("URL enviada exitosamente a Django");
-//                 // Obtener la respuesta de Django
-//                 var response = JSON.parse(xhr.responseText);
-//                 // Verificar si se recibió la URL
-//                 if (response.url && response.cadena) {
-//                     console.log("URL con ID:", response.url);
-//                     // Enviar la cadena a la aplicación de React
-//                     enviarIDAReact(response.cadena);
-//                 } else {
-//                     console.error("Error: No se recibió la URL o la cadena esperada desde Django");
-//                 }
-//             } else {
-//                 console.error("Error al enviar la URL a Django. Código de estado:", xhr.status);
-//             }
-//         }
-//     };
-//     xhr.onerror = function() {
-//         console.error("Error de red al enviar la URL a Django");
-//     };
-//     var data = "urlQuirk=" + encodeURIComponent(urlQuirk);
-//     console.log("Datos enviados:", data);
-//     xhr.send(data);
-// }
-
 function enviarIDAReact(cadena) {
-    // Redirigir a la aplicación de React con la cadena concatenada
     window.location.href = `http://localhost:3000/receptor-datos?id=${cadena}`;
 }
-
-
-
 
 export {initUrlCircuitSync}

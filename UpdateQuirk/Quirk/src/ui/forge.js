@@ -16,6 +16,7 @@
 
 import {Axis} from "../math/Axis.js"
 import {CircuitDefinition} from "../circuit/CircuitDefinition.js"
+import {CircuitStats} from "../circuit/CircuitStats.js"
 import {setGateBuilderEffectToCircuit} from "../circuit/CircuitComputeUtil.js"
 import {Complex} from "../math/Complex.js"
 import {Config} from "../Config.js"
@@ -39,6 +40,45 @@ import {Util} from "../base/Util.js"
 const forgeIsVisible = new ObservableValue(false);
 const obsForgeIsShowing = forgeIsVisible.observable().whenDifferent();
 
+//const MATRIX_EXPORT_FORMAT = new Format(false, 0, 7, ", ");
+const MATRIX_EXPORT_FORMAT = Format.EXACT;
+
+/**
+ * @param {!Gate} gate
+ * @returns {!string}
+ */
+function obtenerMatrizFormateadaDePuerta(gate) {
+    let mat = gate.knownMatrix;
+    if (mat === undefined && typeof gate.knownMatrixAt === "function") {
+        mat = gate.knownMatrixAt(0);
+    }
+    if (mat === undefined && gate.knownCircuit !== undefined) {
+        const circuit = gate.knownCircuit;
+        const n = circuit.numWires;
+        const dim = 1 << n;
+        const buf = new Float32Array(dim * dim * 2);
+
+        for (let col = 0; col < dim; col++) {
+            const initStates = new Map();
+            for (let w = 0; w < n; w++) {
+                if ((col >> w) & 1) {
+                    initStates.set(w, "1");
+                }
+            }
+            const stats = CircuitStats.fromCircuitAtTime(circuit.withInitialStates(initStates), 0);
+            const stateBuf = stats.finalState.rawBuffer();
+            for (let row = 0; row < dim; row++) {
+                const dstIdx = (row * dim + col) * 2;
+                const srcIdx = row * 2;
+                buf[dstIdx] = stateBuf[srcIdx];
+                buf[dstIdx + 1] = stateBuf[srcIdx + 1];
+            }
+        }
+        mat = new Matrix(dim, dim, buf);
+    }
+    return mat !== undefined ? mat.toString(MATRIX_EXPORT_FORMAT) : "{{}}";
+}
+
 /**
  * @param {!Revision} revision
  * @param {!Observable.<!boolean>} obsIsAnyOverlayShowing
@@ -60,7 +100,7 @@ function initForge(revision, obsIsAnyOverlayShowing) {
         document.addEventListener('keydown', e => {
             const ESC_KEY = 27;
             if (e.keyCode === ESC_KEY) {
-                forgeIsVisible.set(false)
+                forgeIsVisible.set(false);
             }
         });
         obsForgeIsShowing.subscribe(showing => {
@@ -92,7 +132,7 @@ function initForge(revision, obsIsAnyOverlayShowing) {
                 'transparent');
             if (!op.isUnitary(0.009)) {
                 painter.printParagraph('NOT UNITARY', rect2, new Point(0.5, 0.5), 'red', 24);
-            } else  if (op.width() !== 2) {
+            } else if (op.width() !== 2) {
                 painter.printParagraph('(Not a 1-qubit rotation)', rect2, new Point(0.5, 0.5), '#666', 20);
             } else {
                 MathPainter.paintBlochSphereRotation(
@@ -117,27 +157,58 @@ function initForge(revision, obsIsAnyOverlayShowing) {
         }
     }
 
+    function enviarPuertaADjango(gateName, symbolId, matrixData) {
+        const urlParams = new URLSearchParams(window.location.search);
+        let email = window.userEmail || urlParams.get('user') || urlParams.get('email');
+
+        if (!email) {
+            console.warn("-> No hay email de usuario disponible; la puerta solo se creará en sesión local.");
+            return Promise.resolve(null);
+        }
+
+        return fetch('http://localhost:8000/circuitos/guardar_puerta_custom/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: email,
+                name: gateName || "CustomGate",
+                symbol: symbolId,
+                definition: matrixData
+            })
+        })
+        .then(function(res) {
+            return res.json()
+                .catch(function() { return {}; })
+                .then(function(data) {
+                    if (!res.ok) {
+                        throw new Error(data.error || data.message || ('Error HTTP ' + res.status));
+                    }
+                    return data;
+                });
+        });
+    }
+
     /**
      * @param {!Gate} gate
      * @param {undefined|!CircuitDefinition=undefined} circuitDef
      */
     function createCustomGateAndClose(gate, circuitDef=undefined) {
-      let c = circuitDef || fromJsonText_CircuitDefinition(latestInspectorText);
-      revision.commit(
-        JSON.stringify(Serializer.toJson(c.withCustomGate(gate)), null, 0)
-      );
-      forgeIsVisible.set(false);
+        let c = circuitDef || fromJsonText_CircuitDefinition(latestInspectorText);
+        revision.commit(
+            JSON.stringify(Serializer.toJson(c.withCustomGate(gate)), null, 0)
+        );
+        forgeIsVisible.set(false);
 
-      // ...dentro de createCustomGateAndClose o después de crear la puerta...
-      window.dispatchEvent(
-        new CustomEvent("customGateCreated", {
-          detail: {
-            gate: gate.serializedId
-          },
-        })
-      );
+        window.dispatchEvent(
+            new CustomEvent("customGateCreated", {
+                detail: {
+                    gate: gate.serializedId
+                },
+            })
+        );
     }
 
+    // From Rotation
     (() => {
         const rotationCanvas = /** @type {!HTMLCanvasElement} */ document.getElementById('gate-forge-rotation-canvas');
         const rotationButton = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-rotation-button');
@@ -145,7 +216,12 @@ function initForge(revision, obsIsAnyOverlayShowing) {
         const txtAngle = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-rotation-angle');
         const txtPhase = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-rotation-phase');
         const txtName = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-rotation-name');
-        obsOnShown.subscribe(() => { txtName.value = ""; });
+        obsOnShown.subscribe(() => {
+            txtAxis.value = "";
+            txtAngle.value = "";
+            txtPhase.value = "";
+            txtName.value = "";
+        });
 
         function parseRotationFromInputs() {
             return parseUserRotation(
@@ -166,26 +242,37 @@ function initForge(revision, obsIsAnyOverlayShowing) {
                 mat = parseRotationFromInputs();
             } catch (ex) {
                 console.warn(ex);
-                return; // Button is about to be disabled, so no handling required.
+                return;
             }
 
-            let gate = new GateBuilder().
-                setSerializedId('~' + Math.floor(Math.random()*(1 << 20)).toString(32)).
-                setSymbol(txtName.value).
-                setTitle('Custom Rotation Gate').
-                setKnownEffectToMatrix(mat).
-                gate;
-            createCustomGateAndClose(gate);
+            let symbolId = '~' + Math.floor(Math.random()*(1 << 20)).toString(32);
+            let gateName = txtName.value.trim() || "Rot";
+
+            enviarPuertaADjango(gateName, symbolId, mat.toString(MATRIX_EXPORT_FORMAT))
+                .then(() => {
+                    let gate = new GateBuilder().
+                        setSerializedId(symbolId).
+                        setSymbol(gateName).
+                        setTitle('Custom Rotation Gate').
+                        setKnownEffectToMatrix(mat).
+                        gate;
+                    createCustomGateAndClose(gate);
+                })
+                .catch(err => alert(err.message));
         });
     })();
 
+    // From Matrix
     (() => {
         const matrixCanvas = /** @type {!HTMLCanvasElement} */ document.getElementById('gate-forge-matrix-canvas');
         const txtMatrix = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-matrix');
         const chkFix = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-matrix-fix');
         const matrixButton = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-matrix-button');
         const txtName = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-matrix-name');
-        obsOnShown.subscribe(() => { txtName.value = ""; });
+        obsOnShown.subscribe(() => {
+            txtMatrix.value = "";
+            txtName.value = "";
+        });
 
         function parseMatrixFromInputs() {
             let text = valueElsePlaceholder(txtMatrix);
@@ -206,23 +293,30 @@ function initForge(revision, obsIsAnyOverlayShowing) {
                 mat = parseMatrixFromInputs();
             } catch (ex) {
                 console.warn(ex);
-                return; // Button is about to be disabled, so no handling required.
+                return;
             }
 
             let name = txtName.value.trim();
-            let h = Math.round(Math.log2(mat.height()));
-            let gate = new GateBuilder().
-                setSerializedId('~' + Math.floor(Math.random()*(1 << 20)).toString(32)).
-                setSymbol(name).
-                setTitle('Custom Matrix Gate').
-                setHeight(h).
-                setWidth(name === '' ? h : 1).
-                setKnownEffectToMatrix(mat).
-                gate;
-            createCustomGateAndClose(gate);
+            let symbolId = '~' + Math.floor(Math.random()*(1 << 20)).toString(32);
+
+            enviarPuertaADjango(name || "Mat", symbolId, mat.toString(MATRIX_EXPORT_FORMAT))
+                .then(() => {
+                    let h = Math.round(Math.log2(mat.height()));
+                    let gate = new GateBuilder().
+                        setSerializedId(symbolId).
+                        setSymbol(name).
+                        setTitle('Custom Matrix Gate').
+                        setHeight(h).
+                        setWidth(name === '' ? h : 1).
+                        setKnownEffectToMatrix(mat).
+                        gate;
+                    createCustomGateAndClose(gate);
+                })
+                .catch(err => alert(err.message));
         });
     })();
 
+    // From Circuit
     (() => {
         const circuitCanvas = /** @type {!HTMLCanvasElement} */ document.getElementById('gate-forge-circuit-canvas');
         const txtCols = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-circuit-cols');
@@ -231,7 +325,11 @@ function initForge(revision, obsIsAnyOverlayShowing) {
         const spanWeight = /** @type {!HTMLElement} */ document.getElementById('gate-forge-circuit-weight');
         const circuitButton = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-circuit-button');
         const txtName = /** @type {!HTMLInputElement} */ document.getElementById('gate-forge-circuit-name');
-        obsOnShown.subscribe(() => { txtName.value = ""; });
+        obsOnShown.subscribe(() => {
+            txtCols.value = "";
+            txtRows.value = "";
+            txtName.value = "";
+        });
 
         /** @returns {{gate: !Gate, circuit: !CircuitDefinition}} */
         function parseEnteredCircuitGate() {
@@ -300,9 +398,13 @@ function initForge(revision, obsIsAnyOverlayShowing) {
         circuitButton.addEventListener('click', () => {
             try {
                 let {gate, circuit} = parseEnteredCircuitGate();
-                createCustomGateAndClose(gate, circuit);
+                let circuitJsonData = JSON.stringify(Serializer.toJson(gate.knownCircuit));
+                enviarPuertaADjango(gate.symbol || "Circ", gate.serializedId, circuitJsonData)
+                    .then(() => {
+                        createCustomGateAndClose(gate, circuit);
+                    })
+                    .catch(err => alert(err.message));
             } catch (ex) {
-                // Button is about to be disabled, so no handling required.
                 console.warn(ex);
             }
         });
@@ -314,7 +416,6 @@ function initForge(revision, obsIsAnyOverlayShowing) {
  * @returns {!string}
  */
 function valueElsePlaceholder(textBox) {
-    //noinspection JSUnresolvedVariable
     return textBox.value === '' ? textBox.placeholder : textBox.value;
 }
 
@@ -335,7 +436,7 @@ function parseUserAngle(text) {
  * @returns {!Matrix}
  */
 function decreasePrecisionAndSerializedSize(matrix) {
-    return Matrix.parse(matrix.toString(new Format(true, 0.0000001, 7, ",")))
+    return Matrix.parse(matrix.toString(new Format(true, 0.0000001, 7, ",")));
 }
 
 /**
@@ -372,35 +473,29 @@ function parseUserRotation(angleText, phaseText, axisText) {
  * @returns {!Matrix}
  */
 function parseUserGateMatrix_noCorrection(text) {
-    // If brackets are present, use the normal parse method that enforces grouping.
     if (text.match(/[\{}\[\]]/)) {
         return Matrix.parse(text.split(/[\{\[]/).join('{').split(/[}\]]/).join('}'));
     }
 
-    // Newlines introduce a break if one isn't already present at that location and we aren't at the end.
     text = text.split(/,?\s*\n\s*(?!$)/).join(',');
     text = text.trim();
-    // Ignore trailing comma.
     if (text.endsWith(',')) {
         text = text.substring(0, text.length - 1);
     }
 
     let parts = text.split(',').map(e => e === '' ? 0 : Complex.parse(e));
 
-    // Expand singleton cell into a 2x2 global phase operation.
     if (parts.length === 1) {
         parts.push(0, 0, parts[0]);
     }
 
-    // Pad with zeroes up to next size that makes sense.
     let n = Math.max(4, 1 << (2*Math.max(1, Util.floorLg2(Math.sqrt(parts.length)))));
     if (n < parts.length) {
         n <<= 2;
     }
     if (n > (1<<8)) {
-        throw Error("Max custom matrix operation size is 4 qubits.")
+        throw Error("Max custom matrix operation size is 4 qubits.");
     }
-    //noinspection JSCheckFunctionSignatures
     return Matrix.square(...parts, ...new Array(n - parts.length).fill(0));
 }
 
@@ -412,7 +507,7 @@ function parseUserGateMatrix_noCorrection(text) {
 function parseUserMatrix(text, ensureUnitary) {
     let op = parseUserGateMatrix_noCorrection(text);
     if (op.width() !== op.height() || op.width() < 2 || op.width() > 16 || !Util.isPowerOf2(op.width())) {
-        throw Error("Matrix must be 2x2, 4x4, 8x8, or 16x16.")
+        throw Error("Matrix must be 2x2, 4x4, 8x8, or 16x16.");
     }
     if (ensureUnitary && !op.hasNaN()) {
         op = op.closestUnitary(0.0001);
@@ -472,7 +567,7 @@ function parseUserGateFromCircuitRange(circuit, colRangeText, wireRangeText, nam
     let colRange = parseRange(colRangeText, circuit.columns.length);
     let rowRange = parseRange(wireRangeText, circuit.numWires);
     if (rowRange.end === rowRange.start) {
-        throw new Error("Empty wire range.")
+        throw new Error("Empty wire range.");
     }
 
     let cols = circuit.columns.

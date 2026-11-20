@@ -55,6 +55,48 @@
     <!-- Whatever is between these start/end analytic tags is stripped by the 'downloading offline copy' code. -->
     <!-- Start Analytics -->
     <!-- End Analytics -->
+
+
+    <script>
+        window.normalizarPuertaQuirk = function (gate) {
+            if (gate && typeof gate.matrix === "string" && gate.matrix.trim().startsWith("{")) {
+                try {
+                    const parsedCircuit = JSON.parse(gate.matrix);
+                    if (parsedCircuit && parsedCircuit.cols) {
+                        return { id: gate.id, name: gate.name, circuit: parsedCircuit };
+                    }
+                } catch (e) {}
+            }
+            return gate;
+        };
+
+        function normalizarGatesEnHash(hashStr) {
+            if (!hashStr || !hashStr.includes("circuit=")) return hashStr;
+            const prefix = "#circuit=";
+            const idx = hashStr.indexOf(prefix);
+            if (idx === -1) return hashStr;
+
+            const rawJson = decodeURIComponent(hashStr.slice(idx + prefix.length));
+            try {
+                const data = JSON.parse(rawJson);
+                if (Array.isArray(data.gates)) {
+                    const antes = JSON.stringify(data.gates);
+                    data.gates = data.gates.map(window.normalizarPuertaQuirk);
+                    if (JSON.stringify(data.gates) !== antes) {
+                        return hashStr.slice(0, idx) + prefix + JSON.stringify(data);
+                    }
+                }
+            } catch (e) {}
+            return hashStr;
+        }
+
+        if (window.location.hash) {
+            const hashLimpio = normalizarGatesEnHash(window.location.hash);
+            if (hashLimpio !== window.location.hash) {
+                window.history.replaceState(null, "", hashLimpio);
+            }
+        }
+    </script>
 </head>
 
 <body style="margin: 0">
@@ -108,16 +150,6 @@
                     Clear Circuit
                 </div>
             </button>
-            <!-- Antes era clear ALL y tenia este icono: 
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                    class="bi bi-x-square" viewBox="0 0 16 16">
-                    <path
-                        d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z" />
-                    <path
-                        d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708" />
-                </svg>
-            
-            -->
             <button id="clear-all-button" style="min-width: 50px; min-height: 30px;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-trash3"
                     viewBox="0 0 16 16">
@@ -600,8 +632,239 @@
 
         <!-- INCLUDE SOURCE PART -->
 
+    </script>
+
+    <!-- LO QUE HABIA QUE NO SE SI ESTABA BIEN O NO-->
+
+    <!-- <script>
+        window.addEventListener('click', function(e) {
+            if (e.target && (
+                e.target.id === 'gate-forge-rotation-button' || 
+                e.target.id === 'gate-forge-matrix-button' || 
+                e.target.id === 'gate-forge-circuit-button'
+            )) {
+                const urlParams = new URLSearchParams(window.location.search);
+                let email = window.userEmail || urlParams.get('user') || urlParams.get('email');
+                
+                if (!email) return;
+
+                let gateName = "CustomGate";
+                let definitionData = "[]";
+
+                if (e.target.id === 'gate-forge-rotation-button') {
+                    let nameInput = document.getElementById('gate-forge-rotation-name');
+                    gateName = nameInput && nameInput.value.trim() !== "" ? nameInput.value.trim() : "Rot";
+                    let angle = document.getElementById('gate-forge-rotation-angle').value || "45";
+                    let axis = document.getElementById('gate-forge-rotation-axis').value || "X+Z";
+                    definitionData = JSON.stringify({ type: "rotation", angle: angle, axis: axis });
+                } 
+                else if (e.target.id === 'gate-forge-matrix-button') {
+                    let nameInput = document.getElementById('gate-forge-matrix-name');
+                    gateName = nameInput && nameInput.value.trim() !== "" ? nameInput.value.trim() : "Mat";
+                    let matrixInput = document.getElementById('gate-forge-matrix');
+                    definitionData = matrixInput ? matrixInput.value.trim() : "1, i, i, 1";
+                } 
+                else if (e.target.id === 'gate-forge-circuit-button') {
+                    let nameInput = document.getElementById('gate-forge-circuit-name');
+                    gateName = nameInput && nameInput.value.trim() !== "" ? nameInput.value.trim() : "Circ";
+                    let cols = document.getElementById('gate-forge-circuit-cols').value || "1:∞";
+                    let rows = document.getElementById('gate-forge-circuit-rows').value || "1:∞";
+                    definitionData = JSON.stringify({ type: "circuit", cols: cols, rows: rows });
+                }
+
+                let symbolId = '~' + Math.floor(Math.random()*(1 << 20)).toString(32);
+
+                fetch('http://localhost:8000/circuitos/guardar_puerta_custom/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        name: gateName,
+                        symbol: symbolId,
+                        definition: definitionData
+                    })
+                })
+                .then(res => res.json())
+                .then(data => console.log("Puerta real guardada:", data))
+                .catch(err => console.error("Error al guardar puerta:", err));
+            }
+        });
+    </script> -->
 
 
+
+    <script>
+        window.addEventListener('click', function (e) {
+            const btn = e.target;
+            if (!btn || (
+                btn.id !== 'gate-forge-rotation-button' &&
+                btn.id !== 'gate-forge-matrix-button' &&
+                btn.id !== 'gate-forge-circuit-button'
+            )) {
+                return;
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const email = window.userEmail || urlParams.get('user') || urlParams.get('email');
+            if (!email) return;
+
+            // 1. Si es matriz: leer literalmente el textarea visible dentro del modal
+            if (btn.id === 'gate-forge-matrix-button') {
+                const forgeDiv = document.getElementById('gate-forge-div') || btn.closest('div');
+                const nameEl = document.getElementById('gate-forge-matrix-name') ||
+                            (forgeDiv && forgeDiv.querySelector('input[type="text"]'));
+                const matrixEl = document.getElementById('gate-forge-matrix') ||
+                                (forgeDiv && forgeDiv.querySelector('textarea'));
+
+                const rawMatrixValue = matrixEl ? matrixEl.value.trim() : '';
+                const rawMatrixName = nameEl && nameEl.value.trim() ? nameEl.value.trim() : 'Mat';
+
+                if (!rawMatrixValue) return;
+
+                setTimeout(() => {
+                    let symbolId = '~' + Math.floor(Math.random() * (1 << 20)).toString(32);
+                    try {
+                        const currentHash = decodeURIComponent(window.location.hash || '');
+                        if (currentHash.startsWith('#circuit=')) {
+                            const currentData = JSON.parse(currentHash.slice('#circuit='.length));
+                            if (Array.isArray(currentData.gates) && currentData.gates.length > 0) {
+                                const ultima = currentData.gates[currentData.gates.length - 1];
+                                if (ultima && ultima.name === rawMatrixName) {
+                                    symbolId = ultima.id;
+                                }
+                            }
+                        }
+                    } catch (err) {}
+
+                    fetch('http://localhost:8000/circuitos/guardar_puerta_custom/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email: email,
+                            name: rawMatrixName,
+                            symbol: symbolId,
+                            definition: rawMatrixValue
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        sessionStorage.removeItem('quirk_gates_synced_' + email);
+                        console.log('Matriz guardada tal cual:', rawMatrixValue, data);
+                    })
+                    .catch(err => console.error('Error al guardar puerta:', err));
+                }, 80);
+                return;
+            }
+
+            // 2. Para Rotación y Circuito
+            let prevGatesCount = 0;
+            try {
+                const prevHash = decodeURIComponent(window.location.hash || '');
+                if (prevHash.startsWith('#circuit=')) {
+                    const prevData = JSON.parse(prevHash.slice('#circuit='.length));
+                    prevGatesCount = Array.isArray(prevData.gates) ? prevData.gates.length : 0;
+                }
+            } catch (err) {}
+
+            setTimeout(() => {
+                const forgeDiv = document.getElementById('gate-forge-div');
+                if (forgeDiv && forgeDiv.style.display !== 'none' && forgeDiv.offsetParent !== null) {
+                    return;
+                }
+
+                try {
+                    const currentHash = decodeURIComponent(window.location.hash || '');
+                    if (!currentHash.startsWith('#circuit=')) return;
+
+                    const currentData = JSON.parse(currentHash.slice('#circuit='.length));
+                    const gates = Array.isArray(currentData.gates) ? currentData.gates : [];
+                    if (gates.length <= prevGatesCount) return;
+
+                    const nuevaPuerta = gates[gates.length - 1];
+                    if (!nuevaPuerta) return;
+
+                    const gateName = nuevaPuerta.name || 'CustomGate';
+                    const symbolId = nuevaPuerta.id || ('~' + Math.floor(Math.random() * (1 << 20)).toString(32));
+                    const definitionData = nuevaPuerta.matrix
+                        ? nuevaPuerta.matrix
+                        : JSON.stringify(nuevaPuerta.circuit);
+
+                    fetch('http://localhost:8000/circuitos/guardar_puerta_custom/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email: email,
+                            name: gateName,
+                            symbol: symbolId,
+                            definition: definitionData
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        sessionStorage.removeItem('quirk_gates_synced_' + email);
+                        console.log('Puerta guardada:', data);
+                    })
+                    .catch(err => console.error('Error al guardar puerta:', err));
+                } catch (err) {
+                    console.error('Error leyendo la nueva puerta:', err);
+                }
+            }, 80);
+        }, true);
+
+        window.addEventListener("DOMContentLoaded", () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const emailUsuario = urlParams.get('user');
+            if (!emailUsuario) return;
+
+            const reloadKey = 'quirk_gates_synced_' + emailUsuario;
+            if (sessionStorage.getItem(reloadKey)) return;
+
+            fetch(`http://localhost:8000/circuitos/obtener_puertas_custom/?email=${encodeURIComponent(emailUsuario)}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                sessionStorage.setItem(reloadKey, '1');
+
+                if (data.custom_gates && data.custom_gates.length > 0) {
+                    let hash = decodeURIComponent(window.location.hash);
+                    let circuitData = { cols: [] };
+
+                    if (hash.startsWith("#circuit=")) {
+                        try {
+                            circuitData = JSON.parse(hash.replace("#circuit=", ""));
+                        } catch (e) {
+                            circuitData = { cols: [] };
+                        }
+                    } else if (hash.startsWith("#")) {
+                        try {
+                            circuitData = JSON.parse(hash.substring(1));
+                        } catch (e) {
+                            circuitData = { cols: [] };
+                        }
+                    }
+
+                    const fetchedGates = data.custom_gates.map(g =>
+                        window.normalizarPuertaQuirk({
+                            id: g.symbol,
+                            name: g.name,
+                            matrix: g.definition
+                        })
+                    );
+
+                    const hashGatesStr = JSON.stringify(circuitData.gates || []);
+                    const fetchedGatesStr = JSON.stringify(fetchedGates);
+
+                    if (hashGatesStr !== fetchedGatesStr) {
+                        circuitData.gates = fetchedGates;
+                        window.location.replace("#circuit=" + JSON.stringify(circuitData));
+                        window.location.reload();
+                    }
+                }
+            })
+            .catch(error => console.error("Error al obtener las puertas custom:", error));
+        });
     </script>
 </body>
 
